@@ -23,10 +23,11 @@ typedef struct
 task;
 
 // the work queue
-task worktodo;
+task worktodo [QUEUE_SIZE];
+int tasks_on_queue = 0;
 
 // the worker bee
-pthread_t bee;
+pthread_t bees [NUMBER_OF_THREADS];
 
 // insert a task into the queue
 // returns 0 if successful or 1 otherwise, 
@@ -63,8 +64,12 @@ void execute(void (*somefunction)(void *p), void *p)
  */
 int pool_submit(void (*somefunction)(void *p), void *p)
 {
-    worktodo.function = somefunction;
-    worktodo.data = p;
+
+    if (tasks_on_queue == QUEUE_SIZE){
+        return 1;
+    }
+
+    
 
     return 0;
 }
@@ -72,7 +77,9 @@ int pool_submit(void (*somefunction)(void *p), void *p)
 // initialize the thread pool
 void pool_init(void)
 {
-    pthread_create(&bee,NULL,worker,NULL);
+    for (int i=0; i<NUMBER_OF_THREADS; i++){
+        pthread_create(&bees[i],NULL,worker,NULL);
+    }
 }
 
 // shutdown the thread pool
