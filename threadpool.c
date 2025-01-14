@@ -1,7 +1,7 @@
+
 /**
  * Implementation of thread pool.
  */
-
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -10,80 +10,94 @@
 
 #define QUEUE_SIZE 10
 #define NUMBER_OF_THREADS 3
-
 #define TRUE 1
 
-// this represents work that has to be 
-// completed by a thread in the pool
-typedef struct 
-{
+typedef struct {
     void (*function)(void *p);
     void *data;
-}
-task;
+} task;
 
-// the work queue
-task worktodo [QUEUE_SIZE];
-int tasks_on_queue = 0;
+task worktodo[QUEUE_SIZE];
+int queue_front = 0;
+int queue_rear = 0;
+int queue_len = 0;
 
-// the worker bee
-pthread_t bees [NUMBER_OF_THREADS];
+pthread_t threads[NUMBER_OF_THREADS];
+pthread_mutex_t queue_mutex;
+sem_t task_sem; //semaforo das tarefas
+int stop_pool = 0; //flag que encerra a pool
 
-// insert a task into the queue
-// returns 0 if successful or 1 otherwise, 
-int enqueue(task t) 
-{
+int enqueue(task t) {
+    pthread_mutex_lock(&queue_mutex); //entra no mutex
+    if (queue_len == QUEUE_SIZE) { //verifica a fila cheia
+        pthread_mutex_unlock(&queue_mutex);
+        return 1;
+    }
+    worktodo[queue_rear] = t; //coloca a task no fim da fila
+    queue_rear = (queue_rear + 1) % QUEUE_SIZE;
+    queue_len++;
+    pthread_mutex_unlock(&queue_mutex); //sai do mutex
+    sem_post(&task_sem); //incremento de semaforo
     return 0;
 }
 
-// remove a task from the queue
-task dequeue() 
-{
-    return worktodo;
+task dequeue() {
+    pthread_mutex_lock(&queue_mutex); //entra no mutex
+    task t = worktodo[queue_front]; //retira a task da frente da fila
+    queue_front = (queue_front + 1) % QUEUE_SIZE;
+    queue_len--;
+    pthread_mutex_unlock(&queue_mutex); //sai do mutex
+    return t; //retorna a task
 }
 
-// the worker thread in the thread pool
-void *worker(void *param)
-{
-    // execute the task
-    execute(worktodo.function, worktodo.data);
+void *worker(void *param) {
+    while (TRUE) {
+        sem_wait(&task_sem);
 
+        if (stop_pool) { //para a pool
+            break;
+        }
+
+        task t = dequeue();
+        execute(t.function, t.data);
+    }
     pthread_exit(0);
 }
 
-/**
- * Executes the task provided to the thread pool
- */
-void execute(void (*somefunction)(void *p), void *p)
-{
+void execute(void (*somefunction)(void *p), void *p) {
     (*somefunction)(p);
 }
 
-/**
- * Submits work to the pool.
- */
-int pool_submit(void (*somefunction)(void *p), void *p)
-{
-
-    if (tasks_on_queue == QUEUE_SIZE){
-        return 1;
-    }
-
-    
-
-    return 0;
+int pool_submit(void (*somefunction)(void *p), void *p) {
+    //criar uma nova task e adicionar na fila
+    task new_task;
+    new_task.function = somefunction;
+    new_task.data = p;
+    return enqueue(new_task);
 }
 
-// initialize the thread pool
-void pool_init(void)
-{
-    for (int i=0; i<NUMBER_OF_THREADS; i++){
-        pthread_create(&bees[i],NULL,worker,NULL);
+void pool_init(void) {
+    pthread_mutex_init(&queue_mutex, NULL);
+    sem_init(&task_sem, 0, 0);
+    stop_pool = 0;
+    for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+        pthread_create(&threads[i], NULL, worker, NULL);
     }
 }
 
-// shutdown the thread pool
-void pool_shutdown(void)
-{
-    pthread_join(bee,NULL);
+void pool_shutdown(void) {
+    pthread_mutex_lock(&queue_mutex);
+    stop_pool = 1;
+    pthread_mutex_unlock(&queue_mutex);
+
+    for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+        sem_post(&task_sem); //incrementar o semaforo para que as threads nao fiquem esperando
+    }
+
+    for (int i = 0; i < NUMBER_OF_THREADS; i++) {
+        pthread_join(threads[i], NULL); //aguardar as threads terminarem suas tarefas pra finalizar
+    }
+
+    pthread_mutex_destroy(&queue_mutex);
+    sem_destroy(&task_sem);
 }
